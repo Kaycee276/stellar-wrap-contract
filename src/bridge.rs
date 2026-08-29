@@ -7,15 +7,6 @@ use crate::{storage_accounting, ContractError, DataKey};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
 
-fn validate_period(e: &Env, period: u64) {
-    let year = period / 100;
-    let month = period % 100;
-
-    if !(2024..=2100).contains(&year) || !(1..=12).contains(&month) {
-        panic_with_error!(e, ContractError::InvalidPeriod);
-    }
-}
-
 /// Set the bridge relayer address. Requires admin authorization.
 pub(crate) fn set_bridge_relayer(e: &Env, relayer: Address) {
     let admin = crate::admin::read_admin(e);
@@ -58,6 +49,7 @@ pub(crate) fn is_chain_supported(e: &Env, chain_id: u32) -> bool {
 
 /// Initiate an outbound cross-chain token/wrap bridge transfer.
 /// User locks/bridges their wrap record to a destination chain.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn bridge_wrap_out(
     e: Env,
     user: Address,
@@ -130,6 +122,7 @@ pub(crate) fn bridge_wrap_out(
 
 /// Fulfill an inbound cross-chain token/wrap bridge transfer.
 /// Called by authorized relayer to process wraps coming from an external chain.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn bridge_wrap_in(
     e: Env,
     source_chain: u32,
@@ -160,7 +153,7 @@ pub(crate) fn bridge_wrap_in(
         panic_with_error!(e, ContractError::NonceAlreadyProcessed);
     }
 
-    validate_period(&e, period);
+    crate::mint::validate_period(&e, period);
 
     e.storage().persistent().set(&processed_key, &true);
     e.storage()

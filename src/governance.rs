@@ -5,6 +5,7 @@ use crate::{AdminProposal, ContractError, DataKey, ProposalStatus};
 
 /// Create a new proposal to update the contract admin.
 /// Returns the generated proposal ID.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn create_admin_proposal(
     e: Env,
     proposer: Address,
@@ -54,6 +55,7 @@ pub(crate) fn create_admin_proposal(
 }
 
 /// Cast a vote on an active governance proposal.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn vote_admin_proposal(e: Env, voter: Address, proposal_id: u64, support: bool) {
     voter.require_auth();
 
@@ -96,6 +98,7 @@ pub(crate) fn vote_admin_proposal(e: Env, voter: Address, proposal_id: u64, supp
 }
 
 /// Execute a proposal once voting has ended. If votes_for > votes_against, the admin is updated.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn execute_admin_proposal(e: Env, proposal_id: u64) {
     let mut proposal: AdminProposal = e
         .storage()
@@ -143,6 +146,7 @@ pub(crate) fn execute_admin_proposal(e: Env, proposal_id: u64) {
 }
 
 /// Cancel a governance proposal. Can be called by the proposer or current admin before execution.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn cancel_admin_proposal(e: Env, caller: Address, proposal_id: u64) {
     caller.require_auth();
 

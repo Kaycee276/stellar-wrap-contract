@@ -77,7 +77,7 @@ fn sign_for_test(
 #[test]
 fn test_zero_hash_mint_failure_leaves_no_guard_entry() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     // ── Setup ─────────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ fn test_zero_hash_mint_failure_leaves_no_guard_entry() {
 #[test]
 fn test_successful_mint_leaves_no_guard_entry() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[0x60u8; 32]);
@@ -201,7 +201,7 @@ fn test_successful_mint_leaves_no_guard_entry() {
 #[test]
 fn test_duplicate_mint_failure_leaves_no_guard_entry() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(&env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[0x61u8; 32]);

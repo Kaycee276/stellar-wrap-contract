@@ -43,7 +43,7 @@ The Generic Token Bridge Interface allows `stellar-wrap-contract` to interact se
    - Source chain must be active.
    - `InboundBridgeProcessed(source_chain, source_nonce)` ensures each cross-chain transaction can only be processed once (preventing double-spend / replay attacks).
 3. **Wrap Minting / Activation**:
-   - Validates period structure (`YYYYMM`).
+   - Validates period structure (`YYYYMM` format, between `MIN_PERIOD_YEAR = 2024` and `MAX_PERIOD_YEAR = 2100` with months `01..=12`, enforced by shared `validate_period`).
    - If wrap record does not exist on Stellar, creates a new active wrap record for `recipient` and updates wrap counts and latest period metadata.
    - If wrap record already exists, transitions state to `Active`.
 4. **Record & Event**:

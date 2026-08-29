@@ -12,13 +12,14 @@ pub(crate) const TTL_TEMP: u32 = 17_280;
 pub const CURRENT_PAYLOAD_VERSION: u32 = 1;
 /// Default expiration duration for unverified wraps: 7 days in seconds.
 const DEFAULT_EXPIRATION_SECONDS: u64 = 7 * 24 * 60 * 60;
+pub const MIN_PERIOD_YEAR: u64 = 2024;
 pub const MAX_PERIOD_YEAR: u64 = 2100;
 
-fn validate_period(e: &Env, period: u64) {
+pub fn validate_period(e: &Env, period: u64) {
     let year = period / 100;
     let month = period % 100;
 
-    if !(2024..=MAX_PERIOD_YEAR).contains(&year) || !(1..=12).contains(&month) {
+    if !(MIN_PERIOD_YEAR..=MAX_PERIOD_YEAR).contains(&year) || !(1..=12).contains(&month) {
         panic_with_error!(e, ContractError::InvalidPeriod);
     }
 }
@@ -57,6 +58,7 @@ pub(crate) fn update_last_updated(e: &Env, user: &Address) {
     }
 }
 
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn mint_wrap(
     e: Env,
     user: Address,
@@ -201,6 +203,7 @@ pub(crate) fn mint_wrap(
 
 pub const MAX_BATCH_SIZE: u32 = 100;
 
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn mint_wrap_batch(
     e: Env,
     items: soroban_sdk::Vec<crate::storage_types::BatchWrapItem>,
@@ -370,6 +373,7 @@ pub(crate) fn mint_wrap_batch(
     }
 }
 
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn transition_wrap_state(e: Env, user: Address, period: u64, next_state: WrapState) {
     crate::admin::require_not_paused(&e);
     user.require_auth();
@@ -436,6 +440,7 @@ pub(crate) fn set_expiration_duration(e: &Env, duration: u64) {
 /// will cause the FSM transition to fail with [`ContractError::InvalidStateTransition`].
 ///
 /// Expired wraps remain in persistent storage; no storage bytes are reclaimed.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn expire_wrap(e: Env, user: Address, period: u64) {
     crate::admin::require_not_paused(&e);
 

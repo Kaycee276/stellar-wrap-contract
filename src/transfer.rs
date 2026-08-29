@@ -4,11 +4,8 @@ use crate::{admin, ContractError, DataKey, TransferFeeConfig, WrapRecord};
 
 const TTL_ONE_YEAR: u32 = 17_280 * 365;
 
-fn read_fee(e: &Env) -> TransferFeeConfig {
-    e.storage()
-        .instance()
-        .get(&DataKey::TransferFee)
-        .unwrap_or_else(|| panic_with_error!(e, ContractError::TransferFeeNotConfigured))
+fn read_fee(e: &Env) -> Option<TransferFeeConfig> {
+    e.storage().instance().get(&DataKey::TransferFee)
 }
 
 fn read_periods(e: &Env, owner: &Address, expected_count: u32) -> Vec<u64> {
@@ -89,6 +86,7 @@ fn write_owner_state(e: &Env, owner: &Address, periods: &Vec<u64>) {
         .extend_ttl(&latest_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
 }
 
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn backfill_wrap_periods(e: Env, user: Address, periods: Vec<u64>) {
     admin::read_admin(&e).require_auth();
 
@@ -128,6 +126,7 @@ pub(crate) fn backfill_wrap_periods(e: Env, user: Address, periods: Vec<u64>) {
         .publish((symbol_short!("backfill"), user), periods.len());
 }
 
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn transfer_wrap(e: Env, from: Address, to: Address, period: u64) {
     from.require_auth();
 
@@ -173,8 +172,10 @@ pub(crate) fn transfer_wrap(e: Env, from: Address, to: Address, period: u64) {
 
     e.storage().temporary().set(&DataKey::TransferGuard, &true);
 
-    if fee.amount > 0 {
-        token::Client::new(&e, &fee.token).transfer(&from, &fee.recipient, &fee.amount);
+    if let Some(ref fee) = fee {
+        if fee.amount > 0 {
+            token::Client::new(&e, &fee.token).transfer(&from, &fee.recipient, &fee.amount);
+        }
     }
 
     e.storage().persistent().remove(&source_key);
@@ -192,8 +193,15 @@ pub(crate) fn transfer_wrap(e: Env, from: Address, to: Address, period: u64) {
     crate::mint::update_last_updated(&e, &to);
 
     e.storage().temporary().remove(&DataKey::TransferGuard);
-    e.events().publish(
-        (symbol_short!("transfer"), from, to, period),
-        (fee.token, fee.recipient, fee.amount),
-    );
+    if let Some(ref fee) = fee {
+        e.events().publish(
+            (symbol_short!("transfer"), from, to, period),
+            (fee.token.clone(), fee.recipient.clone(), fee.amount),
+        );
+    } else {
+        e.events().publish(
+            (symbol_short!("transfer"), from, to, period),
+            (),
+        );
+    }
 }

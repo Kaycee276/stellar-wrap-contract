@@ -11,7 +11,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 fn setup_test_env<'a>(
     env: &'a Env,
 ) -> (StellarWrapContractClient<'a>, Address, Address, SigningKey) {
-    let contract_id = env.register_contract(None, StellarWrapContract);
+    let contract_id = env.register(StellarWrapContract, ());
     let client = StellarWrapContractClient::new(env, &contract_id);
 
     let signing_key = SigningKey::from_bytes(&[7u8; 32]);
@@ -296,4 +296,83 @@ fn test_bridge_paused_blocks_operations() {
         client.bridge_wrap_in(&chain_id, &500u64, &user, &period, &archetype, &data_hash);
     }));
     assert!(in_result.is_err());
+}
+
+#[test]
+fn test_mint_wrap_and_bridge_wrap_in_period_validation_parity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, relayer, signing_key) = setup_test_env(&env);
+    client.set_bridge_relayer(&relayer);
+    let chain_id = 1u32;
+    client.set_chain_status(&chain_id, &true);
+
+    let test_cases = [
+        // Valid periods (MIN_PERIOD_YEAR = 2024, MAX_PERIOD_YEAR = 2100)
+        (202401u64, true),
+        (202412u64, true),
+        (205006u64, true),
+        (210001u64, true),
+        (210012u64, true),
+        // Invalid periods
+        (0u64, false),
+        (202312u64, false), // Below MIN_PERIOD_YEAR
+        (210101u64, false), // Above MAX_PERIOD_YEAR
+        (202400u64, false), // Month 0
+        (202413u64, false), // Month 13
+        (210000u64, false), // Month 0 in max year
+        (210013u64, false), // Month 13 in max year
+        (999999u64, false),
+    ];
+
+    for (period, is_valid) in test_cases {
+        let mint_user = Address::generate(&env);
+        let bridge_user = Address::generate(&env);
+        let archetype = symbol_short!("arch");
+        let data_hash = BytesN::from_array(&env, &[11u8; 32]);
+
+        let sig = sign_mint_payload(
+            &env,
+            &signing_key,
+            &client.address,
+            &mint_user,
+            period,
+            &archetype,
+            &data_hash,
+        );
+
+        let mint_result = catch_unwind(AssertUnwindSafe(|| {
+            client.mint_wrap(&mint_user, &period, &archetype, &data_hash, &1, &sig);
+        }));
+
+        let nonce = period; // unique per iteration
+        let bridge_result = catch_unwind(AssertUnwindSafe(|| {
+            client.bridge_wrap_in(&chain_id, &nonce, &bridge_user, &period, &archetype, &data_hash);
+        }));
+
+        if is_valid {
+            assert!(
+                mint_result.is_ok(),
+                "mint_wrap should accept valid period {}",
+                period
+            );
+            assert!(
+                bridge_result.is_ok(),
+                "bridge_wrap_in should accept valid period {}",
+                period
+            );
+        } else {
+            assert!(
+                mint_result.is_err(),
+                "mint_wrap should reject invalid period {}",
+                period
+            );
+            assert!(
+                bridge_result.is_err(),
+                "bridge_wrap_in should reject invalid period {}",
+                period
+            );
+        }
+    }
 }

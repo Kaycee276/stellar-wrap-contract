@@ -26,6 +26,7 @@ use crate::{ContractError, DataKey};
 /// # Notes
 /// Once burned, the wrap_id is freed and the record cannot be recovered.
 /// The user can later mint a new wrap for the same period if desired.
+#[allow(deprecated)] // TODO(#718): migrate to #[contractevent]
 pub(crate) fn burn_wrap(e: Env, user: Address, period: u64) {
     // 1. Require auth FIRST — verify caller is the owner
     user.require_auth();
