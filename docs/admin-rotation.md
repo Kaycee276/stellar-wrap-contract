@@ -166,36 +166,32 @@ flows. **Do not infer state from events alone.**
 
 ## Signing pubkey rotation
 
-The Ed25519 signing pubkey (`DataKey::AdminPubKey`) is set during `initialize`
-and is **not** exposed via a dedicated rotation function. Rotating it requires a
-contract upgrade that includes a migration:
+The Ed25519 signing pubkey (`DataKey::AdminPubKey`) is updated on-chain by the admin using `update_admin_pubkey(new_pubkey: BytesN<32>)`.
 
-1. Deploy a new WASM version that exposes an `update_admin_pubkey` function (or
-   equivalent migration path).
-2. Call `upgrade` with the new WASM hash (requires admin auth):
+### Procedure
+
+1. Admin calls `update_admin_pubkey`:
    ```bash
    stellar contract invoke \
      --id <CONTRACT_ID> \
      --network <NETWORK> \
      --source <ADMIN_SECRET> \
-     -- upgrade \
-     --new_wasm_hash <NEW_WASM_HASH_HEX>
+     -- update_admin_pubkey \
+     --new_pubkey <NEW_ED25519_PUBKEY_HEX>
    ```
-3. Call `migrate` with the new migration version to apply the key change:
-   ```bash
-   stellar contract invoke \
-     --id <CONTRACT_ID> \
-     --network <NETWORK> \
-     --source <ADMIN_SECRET> \
-     -- migrate \
-     --version <NEXT_MIGRATION_VERSION>
-   ```
-4. Verify with `health` that `has_signing_key` is still `true` and test a mint
-   with a payload signed by the new key on testnet before mainnet.
 
-> **Key difference from admin address rotation:** rotating the signing pubkey
-> requires a contract upgrade and is a more involved process. Plan for a
-> maintenance window and test thoroughly on testnet.
+2. The contract validates that `new_pubkey` is not the all-zero key, overwrites `DataKey::AdminPubKey` in instance storage, and emits a rotation event:
+   - **Topic 0:** `pubkey` (`Symbol`)
+   - **Topic 1:** `rotate` (`Symbol`)
+   - **Data:** `(old_pubkey, new_pubkey)` (`(BytesN<32>, BytesN<32>)`)
+
+3. Signatures produced by the old key are rejected immediately upon rotation.
+
+### Timelock Exemption Rationale
+
+`update_admin_pubkey` is intentionally exempt from the timelock controller (like `pause`).
+
+**Rationale:** Key compromise is the primary emergency event where a mandatory delay is actively harmful: during a timelock delay window (1 hour to 30 days), a compromised key would continue producing valid signatures on-chain. Exemption from the timelock allows the admin to immediately invalidate a compromised signing key without pausing all minting or requiring a WASM upgrade.
 
 ---
 

@@ -22,25 +22,25 @@ Accounting updates:
 
 ---
 
+### Instance storage (`e.storage().instance()`)
+**What lives here**
+
+Configuration and token identity metadata:
+- `DataKey::Admin` → `Address`
+- `DataKey::AdminPubKey` → `BytesN<32>`
+- `DataKey::PendingAdmin` → `Option<Address>`
+- `DataKey::MigrationVersion` → `u32`
+- `DataKey::Name` → `String` (default: `"Stellar Wrap Registry"`)
+- `DataKey::Symbol` → `String` (default: `"WRAP"`)
+
+---
+
 ### Temporary storage (`e.storage().temporary()`)
 **What lives here**
 
 Non-critical global state that has sensible defaults when absent:
 - `DataKey::TotalRevoked` → `u64` (default: `0`)
 - `DataKey::Paused` → `bool` (default: unpaused)
-- `DataKey::Name` → `String` (default: `"Stellar Wrap Registry"`)
-- `DataKey::Symbol` → `String` (default: `"WRAP"`)
-
-**TTL behavior**
-- Temporary storage entries are extended to **~1 day** (17,280 ledgers) on every write.
-- When entries expire, the contract gracefully falls back to hardcoded defaults.
-- This dramatically reduces state rent fees compared to storing in Instance.
-
-**Why temporary storage?**
-- These entries are non-critical: the contract functions correctly with or without them.
-- Temporary storage has the lowest state rent cost of all three tiers.
-- If an admin customizes `Name`/`Symbol` and the entry expires, it simply reverts to the default.
-- `TotalRevoked` is an informational counter that can be derived from revoke events if lost.
 
 ---
 
@@ -51,9 +51,11 @@ For each user:
 - `DataKey::Wrap(Address, u64)` → `WrapRecord`
   - key space: `(user, period)`
 - `DataKey::WrapCount(Address)` → `u32`
-  - total wraps minted for the user
+  - total wraps currently owned by the user
 - `DataKey::LatestPeriod(Address)` → `u64`
-  - maximum `period` value minted so far
+  - maximum `period` value currently owned so far
+- `DataKey::UserPeriods(Address)` → `Vec<u64>`
+  - single unified index of periods currently owned by the user (used by `get_wraps`, `get_all_wraps_for_user`, `get_latest_wrap`, and updated by `mint_wrap`, `transfer_wrap`, and `burn_wrap`)
 
 **TTL behavior**
 - Every persistent entry is extended on write to **~1 year**.
@@ -102,16 +104,16 @@ The contract defines the following storage key enum with their tier assignments:
 - `DataKey::AdminPubKey` (instance)
 - `DataKey::PendingAdmin` (instance)
 - `DataKey::MigrationVersion` (instance)
+- `DataKey::Name` (instance)
+- `DataKey::Symbol` (instance)
 - `DataKey::Wrap(Address, u64)` (persistent)
 - `DataKey::WrapCount(Address)` (persistent)
 - `DataKey::LatestPeriod(Address)` (persistent)
-- `DataKey::UserPeriods(Address)` (persistent)
+- `DataKey::UserPeriods(Address)` (persistent — single unified ownership index)
 - `DataKey::TotalWrapCount` (persistent)
 - `DataKey::AliasHash(Address)` (persistent)
 - `DataKey::TotalRevoked` (temporary)
 - `DataKey::Paused` (temporary)
-- `DataKey::Name` (temporary)
-- `DataKey::Symbol` (temporary)
 - `DataKey::MintGuard(Address)` (temporary — managed separately)
 
 ```rust

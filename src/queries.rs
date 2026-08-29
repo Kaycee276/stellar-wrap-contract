@@ -11,8 +11,8 @@ pub(crate) fn get_mint_timestamp(e: Env, user: Address, period: u64) -> Option<u
 }
 
 /// Return the ledger timestamp of the user's most recent state change via a
-/// successful mint or revoke, or `None` if the user has never minted or had a
-/// wrap revoked.
+/// successful mint, revoke, transfer, or burn operation, or `None` if the
+/// user has never had a state change recorded.
 pub(crate) fn get_last_updated(e: Env, user: Address) -> Option<u64> {
     e.storage().persistent().get(&DataKey::LastUpdated(user))
 }
@@ -177,14 +177,14 @@ pub(crate) fn total_revoked(e: Env) -> u64 {
 
 pub(crate) fn name(e: Env) -> String {
     e.storage()
-        .temporary()
+        .instance()
         .get(&DataKey::Name)
         .unwrap_or_else(|| String::from_str(&e, "Stellar Wrap Registry"))
 }
 
 pub(crate) fn symbol(e: Env) -> String {
     e.storage()
-        .temporary()
+        .instance()
         .get(&DataKey::Symbol)
         .unwrap_or_else(|| String::from_str(&e, "WRAP"))
 }

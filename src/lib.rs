@@ -71,6 +71,14 @@ impl StellarWrapContract {
         admin::update_admin(e, new_admin);
     }
 
+    /// Rotates the Ed25519 signing public key used to verify mint payloads.
+    ///
+    /// Admin-only. Exempt from the timelock to allow immediate recovery in
+    /// key compromise emergencies.
+    pub fn update_admin_pubkey(e: Env, new_pubkey: BytesN<32>) {
+        admin::update_admin_pubkey(e, new_pubkey);
+    }
+
     /// Configures the token-denominated fee charged by `transfer_wrap`.
     ///
     /// Only the current admin may update the configuration. An amount of zero

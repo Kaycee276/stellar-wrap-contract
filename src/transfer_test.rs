@@ -257,6 +257,11 @@ fn admin_can_backfill_legacy_period_indexes() {
             .env
             .storage()
             .persistent()
+            .remove(&DataKey::UserPeriods(fixture.from.clone()));
+        fixture
+            .env
+            .storage()
+            .persistent()
             .remove(&DataKey::WrapPeriods(fixture.from.clone()));
     });
 
@@ -278,6 +283,11 @@ fn legacy_owner_must_be_backfilled_before_another_mint() {
     mint(&fixture, &fixture.from, 202401, 1);
 
     fixture.env.as_contract(&fixture.contract_id, || {
+        fixture
+            .env
+            .storage()
+            .persistent()
+            .remove(&DataKey::UserPeriods(fixture.from.clone()));
         fixture
             .env
             .storage()
@@ -333,6 +343,11 @@ fn transfer_rejects_a_missing_legacy_index_without_charging() {
             .env
             .storage()
             .persistent()
+            .remove(&DataKey::UserPeriods(fixture.from.clone()));
+        fixture
+            .env
+            .storage()
+            .persistent()
             .remove(&DataKey::WrapPeriods(fixture.from.clone()));
     });
 
@@ -353,6 +368,11 @@ fn backfill_rejects_wrong_count_duplicates_and_missing_records() {
     mint(&fixture, &fixture.from, 202402, 2);
 
     fixture.env.as_contract(&fixture.contract_id, || {
+        fixture
+            .env
+            .storage()
+            .persistent()
+            .remove(&DataKey::UserPeriods(fixture.from.clone()));
         fixture
             .env
             .storage()

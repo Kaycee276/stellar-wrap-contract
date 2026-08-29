@@ -57,6 +57,12 @@ pub(crate) fn burn_wrap(e: Env, user: Address, period: u64) {
 
     // 6. Remove period from user's period list
     let user_periods_key = DataKey::UserPeriods(user.clone());
+    let wrap_periods_key = DataKey::WrapPeriods(user.clone());
+
+    if e.storage().persistent().has(&wrap_periods_key) {
+        e.storage().persistent().remove(&wrap_periods_key);
+    }
+
     let mut periods: soroban_sdk::Vec<u64> = e
         .storage()
         .persistent()
@@ -82,7 +88,10 @@ pub(crate) fn burn_wrap(e: Env, user: Address, period: u64) {
         }
     }
 
-    // 7. Emit burn event AFTER state mutation
+    // 7. Update last updated marker
+    crate::mint::update_last_updated(&e, &user);
+
+    // 8. Emit burn event AFTER state mutation
     e.events()
         .publish((symbol_short!("burn"), user.clone(), period), user);
 }

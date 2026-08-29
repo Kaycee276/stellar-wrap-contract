@@ -9,7 +9,7 @@ use soroban_sdk::{
     symbol_short,
     testutils::{
         budget::ContractCostType,
-        {Address as _, Events},
+        {Address as _, Events, Ledger},
     },
     Address, Bytes, BytesN, Env, IntoVal, String, Symbol, TryIntoVal,
 };
@@ -2295,4 +2295,275 @@ fn test_get_latest_wrap_multiple_wraps() {
     assert_eq!(latest3.data_hash, hash3);
 
     assert_eq!(client.balance_of(&user), 3);
+}
+
+#[test]
+fn test_update_admin_pubkey_success_and_immediate_signature_invalidation() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key_1 = SigningKey::from_bytes(&[1u8; 32]);
+    let pubkey_1 = BytesN::from_array(&env, &signing_key_1.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey_1);
+    env.mock_all_auths();
+
+    // 1. Mint with key 1 succeeds
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[1u8; 32]);
+    let sig1 = sign_payload(&env, &signing_key_1, &contract_id, &user, 202401, &archetype, &hash1);
+    client.mint_wrap(&user, &202401, &archetype, &hash1, &1u32, &sig1);
+
+    // 2. Rotate to key 2
+    let signing_key_2 = SigningKey::from_bytes(&[2u8; 32]);
+    let pubkey_2 = BytesN::from_array(&env, &signing_key_2.verifying_key().to_bytes());
+    client.update_admin_pubkey(&pubkey_2);
+
+    // Verify rotation event emitted immediately after call before buffer is cleared by subsequent invocation
+    let events = crate::test_utils::decode_events(&env);
+    let (topics, data) = events.last().expect("no event emitted");
+    let topic_pubkey: Symbol = topics[0].try_into_val(&env).unwrap();
+    let topic_rotate: Symbol = topics[1].try_into_val(&env).unwrap();
+    assert_eq!(topic_pubkey, symbol_short!("pubkey"));
+    assert_eq!(topic_rotate, symbol_short!("rotate"));
+    let (emitted_old, emitted_new): (BytesN<32>, BytesN<32>) = data.try_into_val(&env).unwrap();
+    assert_eq!(emitted_old, pubkey_1);
+    assert_eq!(emitted_new, pubkey_2);
+
+    assert_eq!(client.get_admin_pubkey(), Some(pubkey_2.clone()));
+
+    // 3. Minting with key 1 now fails
+    let hash2 = BytesN::from_array(&env, &[2u8; 32]);
+    let old_sig = sign_payload(&env, &signing_key_1, &contract_id, &user, 202402, &archetype, &hash2);
+    let res = client.try_mint_wrap(&user, &202402, &archetype, &hash2, &1u32, &old_sig);
+    assert!(res.is_err());
+
+    // 4. Minting with key 2 succeeds
+    let new_sig = sign_payload(&env, &signing_key_2, &contract_id, &user, 202402, &archetype, &hash2);
+    client.mint_wrap(&user, &202402, &archetype, &hash2, &1u32, &new_sig);
+    assert!(client.get_wrap(&user, &202402).is_some());
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #52)")] // InvalidAdminPubKey
+fn test_update_admin_pubkey_rejects_zero_pubkey() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let zero_pubkey = BytesN::from_array(&env, &[0u8; 32]);
+    client.update_admin_pubkey(&zero_pubkey);
+}
+
+#[test]
+fn test_update_admin_pubkey_exempt_from_timelock() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key_1 = SigningKey::from_bytes(&[1u8; 32]);
+    let pubkey_1 = BytesN::from_array(&env, &signing_key_1.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &pubkey_1);
+    env.mock_all_auths();
+
+    // Enable timelock
+    client.enable_timelock(&3600);
+
+    // Direct update_admin_pubkey works despite timelock being active
+    let signing_key_2 = SigningKey::from_bytes(&[2u8; 32]);
+    let pubkey_2 = BytesN::from_array(&env, &signing_key_2.verifying_key().to_bytes());
+    client.update_admin_pubkey(&pubkey_2);
+
+    assert_eq!(client.get_admin_pubkey(), Some(pubkey_2));
+}
+
+#[test]
+fn test_name_and_symbol_in_instance_storage_persist_past_ttl() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    let custom_name = String::from_str(&env, "Custom Wrap Registry");
+    let custom_symbol = String::from_str(&env, "CWRAP");
+
+    client.set_name(&custom_name);
+    client.set_symbol(&custom_symbol);
+
+    assert_eq!(client.name(), custom_name);
+    assert_eq!(client.symbol(), custom_symbol);
+
+    // Advance ledger timestamp/sequence past temporary TTL (~17,280 ledgers)
+    env.ledger().with_mut(|li| {
+        li.sequence_number += 20_000;
+        li.timestamp += 20_000 * 5;
+    });
+
+    // Verify custom name and symbol are still returned
+    assert_eq!(client.name(), custom_name);
+    assert_eq!(client.symbol(), custom_symbol);
+}
+
+#[test]
+fn test_migrate_copies_temporary_name_and_symbol_to_instance() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+
+    // Manually inject temporary storage entries simulating pre-migration contract state
+    let temp_name = String::from_str(&env, "Legacy Temp Name");
+    let temp_symbol = String::from_str(&env, "LTEMP");
+    env.as_contract(&contract_id, || {
+        env.storage().temporary().set(&DataKey::Name, &temp_name);
+        env.storage().temporary().set(&DataKey::Symbol, &temp_symbol);
+    });
+
+    // Run migration
+    client.migrate(&1);
+
+    // Assert values copied to instance and removed from temporary
+    assert_eq!(client.name(), temp_name);
+    assert_eq!(client.symbol(), temp_symbol);
+
+    env.as_contract(&contract_id, || {
+        assert!(!env.storage().temporary().has(&DataKey::Name));
+        assert!(!env.storage().temporary().has(&DataKey::Symbol));
+        assert!(env.storage().instance().has(&DataKey::Name));
+        assert!(env.storage().instance().has(&DataKey::Symbol));
+    });
+}
+
+#[test]
+fn test_transfer_wrap_updates_user_periods_index_consistency() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let token = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+    client.set_transfer_fee(&token, &fee_recipient, &0);
+
+    let archetype = symbol_short!("arch");
+
+    // Mint 3 wraps for `from`
+    for period in [202401u64, 202402u64, 202403u64] {
+        let hash = BytesN::from_array(&env, &[(period % 256) as u8; 32]);
+        let sig = sign_payload(&env, &signing_key, &contract_id, &from, period, &archetype, &hash);
+        client.mint_wrap(&from, &period, &archetype, &hash, &1u32, &sig);
+    }
+
+    // Mint 1 wrap for `to`
+    let hash_to = BytesN::from_array(&env, &[99u8; 32]);
+    let sig_to = sign_payload(&env, &signing_key, &contract_id, &to, 202404, &archetype, &hash_to);
+    client.mint_wrap(&to, &202404, &archetype, &hash_to, &1u32, &sig_to);
+
+    assert_eq!(client.get_all_wraps_for_user(&from).len(), 3);
+    assert_eq!(client.get_all_wraps_for_user(&to).len(), 1);
+
+    // Transfer 202402 from `from` to `to`
+    client.transfer_wrap(&from, &to, &202402);
+
+    // `to` must include 202402 and 202404
+    let to_wraps = client.get_all_wraps_for_user(&to);
+    assert_eq!(to_wraps.len(), 2);
+    let to_periods: std::vec::Vec<u64> = to_wraps.iter().map(|w| w.period).collect();
+    assert!(to_periods.contains(&202402));
+    assert!(to_periods.contains(&202404));
+
+    // `from` must exclude 202402
+    let from_wraps = client.get_all_wraps_for_user(&from);
+    assert_eq!(from_wraps.len(), 2);
+    let from_periods: std::vec::Vec<u64> = from_wraps.iter().map(|w| w.period).collect();
+    assert!(!from_periods.contains(&202402));
+
+    // get_wraps returns full page when page-worth exists
+    let from_page = client.get_wraps(&from, &0, &2);
+    assert_eq!(from_page.len(), 2);
+
+    let to_page = client.get_wraps(&to, &0, &2);
+    assert_eq!(to_page.len(), 2);
+}
+
+#[test]
+fn test_last_updated_advances_on_transfer_and_burn() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+    let contract_id = env.register_contract(None, StellarWrapContract);
+    let client = StellarWrapContractClient::new(&env, &contract_id);
+
+    let signing_key = SigningKey::from_bytes(&[1u8; 32]);
+    let admin_pubkey = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let admin = Address::generate(&env);
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let token = Address::generate(&env);
+    let fee_recipient = Address::generate(&env);
+
+    client.initialize(&admin, &admin_pubkey);
+    env.mock_all_auths();
+    client.set_transfer_fee(&token, &fee_recipient, &0);
+
+    let archetype = symbol_short!("arch");
+    let hash1 = BytesN::from_array(&env, &[1u8; 32]);
+    let sig1 = sign_payload(&env, &signing_key, &contract_id, &from, 202401, &archetype, &hash1);
+    client.mint_wrap(&from, &202401, &archetype, &hash1, &1u32, &sig1);
+
+    let hash2 = BytesN::from_array(&env, &[2u8; 32]);
+    let sig2 = sign_payload(&env, &signing_key, &contract_id, &to, 202402, &archetype, &hash2);
+    client.mint_wrap(&to, &202402, &archetype, &hash2, &1u32, &sig2);
+
+    assert_eq!(client.get_last_updated(&from), Some(1_000_000));
+    assert_eq!(client.get_last_updated(&to), Some(1_000_000));
+
+    // Advance ledger timestamp to 1_005_000
+    env.ledger().with_mut(|li| li.timestamp = 1_005_000);
+
+    // Transfer wrap from `from` to `to`
+    client.transfer_wrap(&from, &to, &202401);
+
+    // Both addresses' LastUpdated must advance to 1_005_000
+    assert_eq!(client.get_last_updated(&from), Some(1_005_000));
+    assert_eq!(client.get_last_updated(&to), Some(1_005_000));
+
+    // Advance ledger timestamp to 1_010_000
+    env.ledger().with_mut(|li| li.timestamp = 1_010_000);
+
+    // `to` burns wrap 202401
+    client.burn_wrap(&to, &202401);
+
+    // `to`'s LastUpdated must advance to 1_010_000
+    assert_eq!(client.get_last_updated(&to), Some(1_010_000));
 }

@@ -1,6 +1,5 @@
 use soroban_sdk::{panic_with_error, symbol_short, Address, BytesN, Env};
 
-use crate::mint::TTL_TEMP;
 use crate::{ContractError, DataKey, TransferFeeConfig};
 
 /// Reads the stored admin or panics with `NotInitialized`.
@@ -108,6 +107,16 @@ pub(crate) fn migrate(e: Env, version: u32) {
         panic_with_error!(e, ContractError::MigrationAlreadyApplied);
     }
 
+    // Migrate Name and Symbol from temporary storage to instance storage if present
+    if let Some(name) = e.storage().temporary().get::<_, soroban_sdk::String>(&DataKey::Name) {
+        e.storage().instance().set(&DataKey::Name, &name);
+        e.storage().temporary().remove(&DataKey::Name);
+    }
+    if let Some(symbol) = e.storage().temporary().get::<_, soroban_sdk::String>(&DataKey::Symbol) {
+        e.storage().instance().set(&DataKey::Symbol, &symbol);
+        e.storage().temporary().remove(&DataKey::Symbol);
+    }
+
     e.storage()
         .instance()
         .set(&DataKey::MigrationVersion, &version);
@@ -118,6 +127,39 @@ pub(crate) fn migration_version(e: &Env) -> u32 {
         .instance()
         .get(&DataKey::MigrationVersion)
         .unwrap_or(0)
+}
+
+/// Emergency admin signing-key rotation.
+///
+/// Authorized by the current admin. Exempt from the timelock (like `pause`)
+/// so a compromised key can be immediately rotated without waiting out the
+/// timelock delay window (during which a compromised key would continue to
+/// produce valid signatures).
+pub(crate) fn update_admin_pubkey(e: Env, new_pubkey: BytesN<32>) {
+    let current_admin = read_admin(&e);
+    current_admin.require_auth();
+
+    if new_pubkey == BytesN::from_array(&e, &[0u8; 32]) {
+        panic_with_error!(e, ContractError::InvalidAdminPubKey);
+    }
+
+    let old_pubkey: BytesN<32> = e
+        .storage()
+        .instance()
+        .get(&DataKey::AdminPubKey)
+        .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
+
+    e.storage()
+        .instance()
+        .set(&DataKey::AdminPubKey, &new_pubkey);
+
+    e.events().publish(
+        (
+            symbol_short!("pubkey"),
+            symbol_short!("rotate"),
+        ),
+        (old_pubkey, new_pubkey),
+    );
 }
 
 /// Immediate WASM upgrade.
@@ -227,10 +269,7 @@ pub(crate) fn set_name(e: Env, name: soroban_sdk::String) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    e.storage().temporary().set(&DataKey::Name, &name);
-    e.storage()
-        .temporary()
-        .extend_ttl(&DataKey::Name, TTL_TEMP, TTL_TEMP);
+    e.storage().instance().set(&DataKey::Name, &name);
 }
 
 pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
@@ -241,8 +280,5 @@ pub(crate) fn set_symbol(e: Env, symbol: soroban_sdk::String) {
         .unwrap_or_else(|| panic_with_error!(e, ContractError::NotInitialized));
 
     current_admin.require_auth();
-    e.storage().temporary().set(&DataKey::Symbol, &symbol);
-    e.storage()
-        .temporary()
-        .extend_ttl(&DataKey::Symbol, TTL_TEMP, TTL_TEMP);
+    e.storage().instance().set(&DataKey::Symbol, &symbol);
 }

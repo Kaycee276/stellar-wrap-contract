@@ -158,8 +158,13 @@ pub(crate) fn mint_wrap(
         }
     }
 
-    // UserPeriods: if we push a new period value, account for it
+    // UserPeriods: ownership period index. A user that already has wraps but is missing
+    // this index is a legacy user that must be backfilled via `backfill_wrap_periods`
+    // before further mints are allowed.
     let user_periods_key = DataKey::UserPeriods(user.clone());
+    if !e.storage().persistent().has(&user_periods_key) && current_count > 0 {
+        panic_with_error!(e, ContractError::StorageInvariantViolation);
+    }
     let mut periods: soroban_sdk::Vec<u64> = e
         .storage()
         .persistent()
@@ -180,26 +185,10 @@ pub(crate) fn mint_wrap(
         );
     }
 
-    // WrapPeriods: transfer-index maintained alongside UserPeriods. A user that
-    // already has wraps but is missing this index is a legacy user that must be
-    // backfilled via `backfill_wrap_periods` before further mints are allowed.
+    // Clean up legacy WrapPeriods entry if present
     let wrap_periods_key = DataKey::WrapPeriods(user.clone());
-    if !e.storage().persistent().has(&wrap_periods_key) && current_count > 0 {
-        panic_with_error!(e, ContractError::StorageInvariantViolation);
-    }
-    let mut wrap_periods: soroban_sdk::Vec<u64> = e
-        .storage()
-        .persistent()
-        .get(&wrap_periods_key)
-        .unwrap_or(soroban_sdk::Vec::new(&e));
-    if !wrap_periods.contains(period) {
-        wrap_periods.push_back(period);
-        e.storage()
-            .persistent()
-            .set(&wrap_periods_key, &wrap_periods);
-        e.storage()
-            .persistent()
-            .extend_ttl(&wrap_periods_key, TTL_ONE_YEAR, TTL_ONE_YEAR);
+    if e.storage().persistent().has(&wrap_periods_key) {
+        e.storage().persistent().remove(&wrap_periods_key);
     }
 
     update_last_updated(&e, &user);
